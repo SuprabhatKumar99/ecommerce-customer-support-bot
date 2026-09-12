@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Customer Support Chat</title>
+    <style>
+        body { font-family: system-ui, sans-serif; background: #f1f5f9; margin: 0; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        .chat-container { width: 450px; height: 600px; background: white; border-radius: 12px; display: flex; flex-direction: column; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); overflow: hidden; }
+        .header { background: #2563eb; color: white; padding: 16px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
+        .header .status { font-size: 12px; background: #1d4ed8; padding: 4px 8px; border-radius: 9999px; }
+        .messages { flex: 1; padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+        .msg { max-width: 80%; padding: 10px 14px; border-radius: 10px; font-size: 14px; line-height: 1.4; }
+        .msg.bot { background: #e2e8f0; align-self: flex-start; }
+        .msg.customer { background: #2563eb; color: white; align-self: flex-end; }
+        .msg.agent { background: #fef08a; border: 1px solid #fde047; color: #854d0e; align-self: flex-start; }
+        .msg.system { background: #f1f5f9; color: #64748b; font-size: 12px; align-self: center; font-style: italic; }
+        .input-box { display: flex; padding: 12px; border-top: 1px solid #e2e8f0; gap: 8px; }
+        input { flex: 1; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; outline: none; }
+        button { background: #2563eb; color: white; border: none; padding: 10px 16px; border-radius: 6px; cursor: pointer; }
+        button:hover { background: #1d4ed8; }
+        .escalate-btn { background: #ef4444; margin-left: 8px; }
+        .escalate-btn:hover { background: #dc2626; }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="header">
+            <span>Customer Assistant</span>
+            <span id="sessionStatus" class="status">AI Connected</span>
+        </div>
+        <div class="messages" id="messagesList">
+            <div class="msg system">Session started. Default customer: Alice Johnson</div>
+            <div class="msg bot">Hello! I can help you with tracking orders, cancellations, returns, refunds, or general questions. How may I assist you today?</div>
+        </div>
+        <div class="input-box">
+            <input type="text" id="userInput" placeholder="Type a message or enter an Order ID..." onkeydown="if(event.key==='Enter') sendMessage()">
+            <button onclick="sendMessage()">Send</button>
+            <button class="escalate-btn" onclick="requestEscalation()" title="Request Human Agent">Escalate</button>
+        </div>
+    </div>
+
+    <script>
+        const CUSTOMER_ID = "c0000000-0000-0000-0000-000000000001";
+        let conversationId = null;
+        let eventSource = null;
+
+        async function initConversation() {
+            try {
+                const res = await fetch("/api/v1/conversations", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ customer_id: CUSTOMER_ID })
+                });
+                const data = await res.json();
+                conversationId = data.conversation_id;
+                setupSSE(conversationId);
+            } catch (err) {
+                console.error("Failed to initialize conversation", err);
+            }
+        }
+
+        function setupSSE(convId) {
+            eventSource = new EventSource(`/api/v1/conversations/${convId}/events`);
+            eventSource.onmessage = (e) => {
+                const event = JSON.parse(e.data);
+                if (event.event === "NEW_MESSAGE") {
+                    appendMessage(event.data.content, event.data.sender.toLowerCase());
+                } else if (event.event === "AGENT_CONNECTED") {
+                    document.getElementById("sessionStatus").innerText = "Agent Assigned";
+                    document.getElementById("sessionStatus").style.background = "#eab308";
+                    appendMessage("A human agent has connected to this session.", "system");
+                } else if (event.event === "AGENT_CLAIMED") {
+                    document.getElementById("sessionStatus").innerText = "Live with Agent";
+                    document.getElementById("sessionStatus").style.background = "#22c55e";
+                    appendMessage("Support agent has claimed your ticket and is active.", "system");
+                } else if (event.event === "RETURNED_TO_BOT") {
+                    document.getElementById("sessionStatus").innerText = "AI Connected";
+                    document.getElementById("sessionStatus").style.background = "#1d4ed8";
+                    appendMessage("Conversation returned to the AI assistant.", "system");
+                }
+            };
+        }
+
+        function appendMessage(text, role) {
+            const div = document.createElement("div");
+            div.className = `msg ${role}`;
+            div.innerText = text;
+            const container = document.getElementById("messagesList");
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById("userInput");
+            const text = input.value.trim();
+            if (!text || !conversationId) return;
+
+            appendMessage(text, "customer");
+            input.value = "";
+
+            try {
+                const res = await fetch(`/api/v1/conversations/${conversationId}/messages`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ message: text })
+                });
+                const data = await res.json();
+                if (data.response && !data.escalated) {
+                    appendMessage(data.response, "bot");
+                } else if (data.escalated) {
+                    appendMessage(data.response, "system");
+                }
+            } catch (err) {
+                appendMessage("Failed to send message.", "system");
+            }
+        }
+
+        async function requestEscalation() {
+            if (!conversationId) return;
+            appendMessage("Requesting human escalation...", "system");
+            await fetch(`/api/v1/conversations/${conversationId}/escalate`, { method: "POST" });
+        }
+
+        window.onload = initConversation;
+    </script>
+</body>
+</html>

@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Support Agent Dashboard</title>
+    <style>
+        body { font-family: system-ui, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 20px; }
+        .dashboard { display: grid; grid-template-columns: 350px 1fr; gap: 20px; height: calc(100vh - 40px); }
+        .panel { background: #1e293b; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; overflow: hidden; border: 1px solid #334155; }
+        h2 { margin-top: 0; font-size: 18px; color: #38bdf8; }
+        .ticket-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+        .ticket-card { background: #334155; padding: 12px; border-radius: 8px; cursor: pointer; transition: 0.2s; border-left: 4px solid #38bdf8; }
+        .ticket-card:hover { background: #475569; }
+        .ticket-card.HIGH { border-left-color: #ef4444; }
+        .ticket-card.MEDIUM { border-left-color: #f59e0b; }
+        .ticket-header { display: flex; justify-content: space-between; font-weight: bold; font-size: 13px; }
+        .ticket-sub { font-size: 12px; color: #cbd5e1; margin-top: 4px; }
+        .chat-view { flex: 1; display: flex; flex-direction: column; }
+        .chat-messages { flex: 1; background: #0f172a; border-radius: 8px; padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+        .msg { max-width: 70%; padding: 8px 12px; border-radius: 8px; font-size: 14px; }
+        .msg.customer { background: #2563eb; align-self: flex-start; color: white; }
+        .msg.bot { background: #475569; align-self: flex-start; color: #f8fafc; }
+        .msg.agent { background: #059669; align-self: flex-end; color: white; }
+        .chat-input { display: flex; gap: 10px; }
+        input { flex: 1; background: #0f172a; border: 1px solid #334155; padding: 10px; border-radius: 6px; color: white; outline: none; }
+        button { background: #38bdf8; color: #0f172a; border: none; padding: 10px 18px; border-radius: 6px; font-weight: bold; cursor: pointer; }
+        button.action { background: #f59e0b; }
+        button:hover { opacity: 0.9; }
+    </style>
+</head>
+<body>
+    <div class="dashboard">
+        <div class="panel">
+            <h2>Escalated Tickets Queue</h2>
+            <div class="ticket-list" id="ticketList">
+                <div style="color: #94a3b8; font-size: 13px;">Listening for live ticket events via SSE...</div>
+            </div>
+        </div>
+
+        <div class="panel chat-view">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h2 id="activeChatTitle">Select a ticket to inspect</h2>
+                <div id="actionButtons" style="display:none;">
+                    <button class="action" onclick="claimActiveTicket()">Claim Ticket</button>
+                    <button class="action" style="background:#10b981;" onclick="returnToBot()">Return to Bot</button>
+                </div>
+            </div>
+            <div class="chat-messages" id="activeChatMessages">
+                <div style="color:#64748b; font-style:italic; margin:auto;">No active ticket selected</div>
+            </div>
+            <div class="chat-input" id="chatInputArea" style="display:none;">
+                <input type="text" id="agentInput" placeholder="Type reply as support agent..." onkeydown="if(event.key==='Enter') sendAgentMessage()">
+                <button onclick="sendAgentMessage()">Send Reply</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const AGENT_ID = "a0000000-0000-0000-0000-000000000001";
+        let activeTicket = null;
+        let tickets = [];
+
+        async function loadTickets() {
+            try {
+                const res = await fetch("/api/v1/agent/tickets");
+                tickets = await res.json();
+                renderTicketList();
+            } catch (err) {
+                console.error("Failed to load tickets", err);
+            }
+        }
+
+        function renderTicketList() {
+            const list = document.getElementById("ticketList");
+            list.innerHTML = "";
+            if (tickets.length === 0) {
+                list.innerHTML = "<div style='color:#94a3b8; font-size:13px;'>No open tickets in queue.</div>";
+                return;
+            }
+            tickets.forEach(t => {
+                const card = document.createElement("div");
+                card.className = `ticket-card ${t.priority}`;
+                card.onclick = () => selectTicket(t);
+                card.innerHTML = `
+                    <div class="ticket-header">
+                        <span>${t.customer_name}</span>
+                        <span>${t.priority}</span>
+                    </div>
+                    <div class="ticket-sub">${t.reason}</div>
+                    <div class="ticket-sub" style="font-size:11px; color:#94a3b8;">Status: ${t.status}</div>
+                `;
+                list.appendChild(card);
+            });
+        }
+
+        async function selectTicket(ticket) {
+            activeTicket = ticket;
+            document.getElementById("activeChatTitle").innerText = `Ticket #${ticket.id.slice(0,8)} - ${ticket.customer_name}`;
+            document.getElementById("actionButtons").style.display = "flex";
+            document.getElementById("chatInputArea").style.display = "flex";
+            
+            // Fetch conversation messages
+            const res = await fetch(`/api/v1/conversations/${ticket.conversation_id}`);
+            const data = await res.json();
+            const container = document.getElementById("activeChatMessages");
+            container.innerHTML = "";
+            data.messages.forEach(m => {
+                const div = document.createElement("div");
+                div.className = `msg ${m.sender_type.toLowerCase()}`;
+                div.innerText = `[${m.sender_type}] ${m.content}`;
+                container.appendChild(div);
+            });
+            container.scrollTop = container.scrollHeight;
+        }
+
+        async function claimActiveTicket() {
+            if (!activeTicket) return;
+            await fetch(`/api/v1/agent/tickets/${activeTicket.id}/claim`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ agent_id: AGENT_ID })
+            });
+            alert("Ticket claimed. You are now controlling this conversation.");
+            loadTickets();
+        }
+
+        async function returnToBot() {
+            if (!activeTicket) return;
+            await fetch(`/api/v1/agent/tickets/${activeTicket.id}/return-to-bot`, { method: "POST" });
+            alert("Conversation returned to automated bot.");
+            activeTicket = null;
+            document.getElementById("actionButtons").style.display = "none";
+            document.getElementById("chatInputArea").style.display = "none";
+            document.getElementById("activeChatTitle").innerText = "Select a ticket to inspect";
+            document.getElementById("activeChatMessages").innerHTML = "<div style='color:#64748b; font-style:italic; margin:auto;'>No active ticket selected</div>";
+            loadTickets();
+        }
+
+        async function sendAgentMessage() {
+            const input = document.getElementById("agentInput");
+            const text = input.value.trim();
+            if (!text || !activeTicket) return;
+
+            const res = await fetch(`/api/v1/agent/tickets/${activeTicket.id}/messages`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ agent_id: AGENT_ID, message: text })
+            });
+            input.value = "";
+            selectTicket(activeTicket);
+        }
+
+        function setupAgentSSE() {
+            const es = new EventSource("/api/v1/agent/events");
+            es.onmessage = (e) => {
+                const event = JSON.parse(e.data);
+                if (event.event === "TICKET_CREATED") {
+                    loadTickets();
+                }
+            };
+        }
+
+        window.onload = () => {
+            loadTickets();
+            setupAgentSSE();
+        };
+    </script>
+</body>
+</html>

@@ -1,0 +1,51 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: support_bot_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ecommerce_support
+      POSTGRES_USER: support_admin
+      POSTGRES_PASSWORD: support_secure_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backend/migrations/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U support_admin -d ecommerce_support"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: support_bot_app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://support_admin:support_secure_password@postgres:5432/ecommerce_support
+      DATABASE_URL_SYNC: postgresql://support_admin:support_secure_password@postgres:5432/ecommerce_support
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      APP_ENV: production
+      LOG_LEVEL: INFO
+    volumes:
+      - ./knowledge:/knowledge
+      - ./frontend:/app/static
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  pgdata:
+    driver: local
