@@ -62,6 +62,6 @@ curl -X POST http://localhost:8000/api/v1/admin/ingest-knowledge
 
 | Order ID | Customer | Status | Amount | Items |
 | :--- | :--- | :--- | :--- | :--- |
-| `o0000000-0000-0000-0000-000000000001` | Alice | `PROCESSING` | $199.99 | Acoustic Headphones (Eligible for cancellation) |
-| `o0000000-0000-0000-0000-000000000002` | Alice | `DELIVERED` | $149.50 | Smartwatch (Eligible for return) |
-| `o0000000-0000-0000-0000-000000000003` | Bob | `SHIPPED` | $349.49 | Multi-item package (Ownership check test) |
+| `b0000000-0000-0000-0000-000000000001` | Alice | `PROCESSING` | $199.99 | Acoustic Headphones (Eligible for cancellation) |
+| `b0000000-0000-0000-0000-000000000002` | Alice | `DELIVERED` | $149.50 | Smartwatch (Eligible for return) |
+| `b0000000-0000-0000-0000-000000000003` | Bob | `SHIPPED` | $349.49 | Multi-item package (Ownership check test) |
