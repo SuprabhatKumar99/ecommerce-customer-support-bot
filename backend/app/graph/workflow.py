@@ -3,6 +3,7 @@ import re
 from typing import Literal
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_huggingface import ChatHuggingFace
 from langgraph.graph import StateGraph, END
 from app.graph.state import SupportState, IntentResult
 from app.rag.retrieval import RAGRetriever
@@ -12,15 +13,22 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 
 
+# def get_llm():
+#     if not settings.GEMINI_API_KEY or settings.GEMINI_API_KEY == "test-api-key":
+#         return None
+#     return ChatGoogleGenerativeAI(
+#         model=settings.GEMINI_MODEL,
+#         temperature=0.0,
+#         google_api_key=settings.GEMINI_API_KEY
+#     )
 def get_llm():
-    if not settings.GEMINI_API_KEY or settings.GEMINI_API_KEY == "test-api-key":
+    if not settings.HF_TOKEN or settings.HF_TOKEN == "test-api-key":
         return None
-    return ChatGoogleGenerativeAI(
-        model=settings.GEMINI_MODEL,
+    return ChatHuggingFace(
+        model=settings.HF_MODEL,
         temperature=0.0,
-        google_api_key=settings.GEMINI_API_KEY
+        google_api_key=settings.HF_TOKEN
     )
-
 
 rag_retriever = RAGRetriever()
 
@@ -42,19 +50,19 @@ def extract_text(content) -> str:
     return str(content)
 
 
-
 async def load_context(state: SupportState) -> dict:
     return {
         "retrieved_documents": [],
         "tool_results": [],
-        "escalation_required": False,
-        "escalation_reason": None,
+        "escalation_required": state.get("escalation_required", False),
+        "escalation_reason": state.get("escalation_reason"),
+        "escalation_priority": state.get("escalation_priority", "MEDIUM"),
         "consecutive_failures": state.get("consecutive_failures", 0)
     }
 
 
 async def classify_intent(state: SupportState) -> dict:
-    latest_msg = extract_text(state["messages"][-1].content)
+    latest_msg = state["messages"][-1].content
     llm = get_llm()
     
     # Fallback heuristic if API key is not configured
@@ -102,7 +110,7 @@ async def classify_intent(state: SupportState) -> dict:
 
 
 async def execute_rag(state: SupportState) -> dict:
-    query = extract_text(state["messages"][-1].content)
+    query = state["messages"][-1].content
     async with AsyncSessionLocal() as session:
         chunks = await rag_retriever.retrieve(session, query=query, top_k=4)
     return {"retrieved_documents": chunks}
@@ -135,7 +143,7 @@ async def execute_ecommerce_tool(state: SupportState) -> dict:
             tool_res = await OrderService.cancel_order(session, order_uuid, customer_id)
         elif intent == "RETURN":
             tool_res = await OrderService.create_return_request(
-                session, order_uuid, customer_id, reason=extract_text(state["messages"][-1].content)
+                session, order_uuid, customer_id, reason=state["messages"][-1].content
             )
         elif intent == "REFUND":
             tool_res = await OrderService.get_refund_status(session, order_uuid, customer_id)
@@ -149,15 +157,23 @@ async def execute_ecommerce_tool(state: SupportState) -> dict:
         "consecutive_failures": current_failures if is_failure else 0
     }
 
-
 async def evaluate_escalation(state: SupportState) -> dict:
     intent = state.get("intent")
     confidence = state.get("intent_confidence", 1.0)
     failures = state.get("consecutive_failures", 0)
-    
+
     if state.get("escalation_required"):
-        return {"escalation_required": True}
-        
+        reason = state.get("escalation_reason") or (
+            "Customer requested human representative" if intent == "HUMAN_HANDOFF" 
+            else "AI Escalation Policy Triggered"
+        )
+        priority = state.get("escalation_priority") or "HIGH"
+        return {
+            "escalation_required": True,
+            "escalation_reason": reason,
+            "escalation_priority": priority
+        }
+
     if intent in ("COMPLAINT", "HUMAN_HANDOFF"):
         return {
             "escalation_required": True, 
@@ -180,7 +196,6 @@ async def evaluate_escalation(state: SupportState) -> dict:
         }
         
     return {"escalation_required": False}
-
 
 async def generate_response(state: SupportState) -> dict:
     if state.get("response"):
@@ -225,37 +240,29 @@ async def generate_response(state: SupportState) -> dict:
     )
     prompt = f"{system_prompt}\n\nContext:\n{context_str}"
     ai_msg = await llm.ainvoke([SystemMessage(content=prompt), *state["messages"][-4:]])
-    raw_content = ai_msg.content
-    if isinstance(raw_content, list):
-        parts = []
-        for p in raw_content:
-            if isinstance(p, str):
-                parts.append(p)
-            elif isinstance(p, dict) and p.get("type") == "text":
-                parts.append(p.get("text", ""))
-            elif isinstance(p, dict) and "text" in p:
-                parts.append(str(p.get("text", "")))
-            elif hasattr(p, "text"):
-                parts.append(str(p.text))
-        text_response = "".join(parts).strip() or str(raw_content)
-    else:
-        text_response = str(raw_content)
-
-    return {"messages": [ai_msg], "response": text_response}
-
-
+    return {"messages": [ai_msg], "response": ai_msg.content}
+    
 async def escalate_and_create_ticket(state: SupportState) -> dict:
+    intent = state.get("intent")
+    default_reason = (
+        "Customer requested human representative" if intent == "HUMAN_HANDOFF" 
+        else "AI Escalation Policy Triggered"
+    )
+    chosen_reason = state.get("escalation_reason") or default_reason
+    chosen_priority = state.get("escalation_priority") or (
+        "HIGH" if intent in ("HUMAN_HANDOFF", "COMPLAINT") else "MEDIUM"
+    )
+
     async with AsyncSessionLocal() as session:
         ticket = await TicketService.create_ticket(
             session=session,
             conversation_id=uuid.UUID(state["conversation_id"]),
             customer_id=uuid.UUID(state["customer_id"]),
-            priority=state.get("escalation_priority", "MEDIUM"),
-            reason=state.get("escalation_reason", "AI Escalation Policy Triggered"),
-            summary=f"Automated handoff. Intent: {state.get('intent')}. Last query: {extract_text(state['messages'][-1].content)}"
+            priority=chosen_priority,
+            reason=chosen_reason,
+            summary=f"Automated handoff. Intent: {intent}. Last query: {extract_text(state['messages'][-1].content)}"
         )
         await session.commit()
-    
     handoff_text = (
         "I've connected our customer support team and created a ticket for you. "
         f"A human agent has been assigned (Ticket ID: {ticket.id}) and will assist you shortly."

@@ -90,12 +90,7 @@ async def send_message(
     final_state = await support_graph.ainvoke(inputs)
     
     await ConversationService.append_message(db, conversation_id, "CUSTOMER", req.message)
-    raw_reply = final_state.get("response", "Thank you for reaching out.")
-    if isinstance(raw_reply, list):
-        parts = [p.get("text", "") if isinstance(p, dict) and p.get("type") == "text" else (p if isinstance(p, str) else "") for p in raw_reply]
-        bot_reply = "".join(parts).strip() or str(raw_reply)
-    else:
-        bot_reply = str(raw_reply)
+    bot_reply = final_state.get("response", "Thank you for reaching out.")
     await ConversationService.append_message(db, conversation_id, "BOT", bot_reply)
     
     ticket_id = final_state.get("ticket_id")

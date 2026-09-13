@@ -25,32 +25,15 @@ class ConversationService:
         session: AsyncSession,
         conversation_id: uuid.UUID,
         sender_type: str,
-        content: any,
+        content: str,
         sender_id: Optional[str] = None,
         metadata: Optional[dict] = None
     ) -> Message:
-        if isinstance(content, list):
-            parts = []
-            for item in content:
-                if isinstance(item, str):
-                    parts.append(item)
-                elif isinstance(item, dict) and item.get("type") == "text":
-                    parts.append(item.get("text", ""))
-                elif isinstance(item, dict) and "text" in item:
-                    parts.append(str(item.get("text", "")))
-                elif hasattr(item, "text"):
-                    parts.append(str(item.text))
-            normalized = "".join(parts).strip() or str(content)
-        elif not isinstance(content, str):
-            normalized = str(content)
-        else:
-            normalized = content
-
         msg = Message(
             conversation_id=conversation_id,
             sender_type=sender_type,
             sender_id=sender_id,
-            content=normalized,
+            content=content,
             metadata_=metadata or {}
         )
         session.add(msg)

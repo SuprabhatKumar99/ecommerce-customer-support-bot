@@ -15,12 +15,16 @@ class TicketService:
         reason: str,
         summary: Optional[str] = None
     ) -> SupportTicket:
-        p_enum = TicketPriority[priority.upper()] if priority.upper() in TicketPriority.__members__ else TicketPriority.MEDIUM
+        p_enum = TicketPriority[priority.upper()] if (priority and priority.upper() in TicketPriority.__members__) else TicketPriority.MEDIUM
+        
+        # Ensure reason is never None or whitespace
+        safe_reason = reason.strip() if (reason and isinstance(reason, str) and reason.strip()) else "Customer Escalation Request"
+        
         ticket = SupportTicket(
             conversation_id=conversation_id,
             customer_id=customer_id,
             priority=p_enum,
-            reason=reason,
+            reason=safe_reason,
             status=TicketStatus.OPEN,
             summary=summary
         )
@@ -31,7 +35,7 @@ class TicketService:
         event = EscalationEvent(
             ticket_id=ticket.id,
             conversation_id=conversation_id,
-            reason=reason,
+            reason=safe_reason,
             confidence=0.5,
             metadata_={"summary": summary}
         )
