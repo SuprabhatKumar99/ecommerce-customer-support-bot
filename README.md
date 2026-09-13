@@ -30,7 +30,7 @@ Edit `.env` and set your `GEMINI_API_KEY or HF_TOKEN`:
 ```env
 GEMINI_API_KEY=your-actual-google-gemini-api-key
 or
-HF_TOKEN=your-actual-google-gemini-api-key
+HF_TOKEN=your-actual-hugging-face-token
 ```
 #### Currently HuggingFace is in working
 ---
