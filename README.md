@@ -1,6 +1,6 @@
 # E-Commerce Customer Support Bot with Human Escalation (MVP)
 
-Production-ready modular monolith architecture integrating FastAPI, LangChain, LangGraph, Google Gemini via Google GenAI, and PostgreSQL + pgvector.
+Production-ready modular monolith architecture integrating FastAPI, LangChain, LangGraph, Google Gemini via Google GenAI | HuggingFace , and PostgreSQL + pgvector.
 
 ---
 
@@ -26,11 +26,14 @@ Create `.env` file from the example:
 ```bash
 cp .env.example .env
 ```
-Edit `.env` and set your `GEMINI_API_KEY`:
+Edit `.env` and set your `GEMINI_API_KEY or HF_TOKEN`:
 ```env
 GEMINI_API_KEY=your-actual-google-gemini-api-key
+or
+HF_TOKEN=your-actual-google-gemini-api-key
 ```
-
+#### Currently HuggingFace is in working
+---
 ### 2. Start Services
 ```bash
 docker-compose up --build
